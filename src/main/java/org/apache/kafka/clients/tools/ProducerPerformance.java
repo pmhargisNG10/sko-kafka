@@ -12,34 +12,47 @@
  */
 package org.apache.kafka.clients.tools;
 
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.kafka.clients.producer.*;
+import org.apache.log4j.Logger;
+import org.joda.time.DateTime;
+import org.json.JSONException;
+import org.json.JSONStringer;
 
-import java.util.Arrays;
-import java.util.Properties;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.util.*;
 
 public class ProducerPerformance {
+
+    private static Logger LOG = Logger.getLogger(ProducerPerformance.class);
+
+    private static final String TRACE_KEY = "Trace";
+    private static final String DEPTH_KEY = "Depth";
+    private static final String TEMPERATURE_KEY = "Temp";
 
     private static final long NS_PER_MS = 1000000L;
     private static final long NS_PER_SEC = 1000 * NS_PER_MS;
     private static final long MIN_SLEEP_NS = 2 * NS_PER_MS;
 
     private static final String SKO_KAFKA_CLUSTER_ADDRESS = "scregionsko1502.cloud.hortonworks.com:6667" ;
+    private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/1000traces.tsv" ;
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 4) {
+        if (args.length < 3) {
             System.err.println("USAGE: java " + ProducerPerformance.class.getName() +
-                               " topic_name num_records record_size target_records_sec [prop_name=prop_value]*");
+                               " topic_name max_records target_records_sec [prop_name=prop_value]*");
             System.exit(1);
         }
 
         /* parse args */
         String topicName = args[0];
         long numRecords = Long.parseLong(args[1]);
-        int recordSize = Integer.parseInt(args[2]);
-        int throughput = Integer.parseInt(args[3]);
+        int throughput_target = Integer.parseInt(args[2]);
 
         Properties props = new Properties();
-        for (int i = 4; i < args.length; i++) {
+        for (int i = 3; i < args.length; i++) {
             String[] pieces = args[i].split("=");
             if (pieces.length != 2)
                 throw new IllegalArgumentException("Invalid property: " + args[i]);
@@ -49,18 +62,24 @@ public class ProducerPerformance {
         props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, SKO_KAFKA_CLUSTER_ADDRESS);
         KafkaProducer producer = new KafkaProducer(props);
 
-        /* setup perf test */
+        BufferedReader br = openDataFile(SKO_RAW_DTS_DATA_FILE);
 
-        byte[] payload = new byte[recordSize];
-        // Arrays.fill(payload, (byte) 1);
-        char c = 'v';
-        Arrays.fill(payload, (byte) c);
-
-        ProducerRecord record = new ProducerRecord(topicName, payload);
-        long sleepTime = NS_PER_SEC / throughput;
+        long sleepTime = NS_PER_SEC / throughput_target;
         long sleepDeficitNs = 0;
         Stats stats = new Stats(numRecords, 5000);
-        for (int i = 0; i < numRecords; i++) {
+        // Read data from file, convert to JSON, and send message to Kafka
+        for (int ii = 0; ii < numRecords; ii++) {
+            String line = br.readLine();
+            if (line == null || line.length() == 0) {
+                break;
+            }
+
+            String jsonMessage = convertRawDataToJson(line);
+
+            /* Load data into payload */
+            byte[] payload = Bytes.toBytes(jsonMessage);
+            ProducerRecord record = new ProducerRecord(topicName, payload);
+
             long sendStart = System.currentTimeMillis();
             Callback cb = stats.nextCompletion(sendStart, payload.length, stats);
             producer.send(record, cb);
@@ -70,14 +89,8 @@ public class ProducerPerformance {
              * instead of sleeping each time instead wait until a minimum sleep time accumulates (the "sleep deficit")
              * and then make up the whole deficit in one longer sleep.
              */
-            if (throughput > 0) {
-                sleepDeficitNs += sleepTime;
-                if (sleepDeficitNs >= MIN_SLEEP_NS) {
-                    long sleepMs = sleepDeficitNs / 1000000;
-                    long sleepNs = sleepDeficitNs - sleepMs * 1000000;
-                    Thread.sleep(sleepMs, (int) sleepNs);
-                    sleepDeficitNs = 0;
-                }
+            if (throughput_target > 0) {
+                sleepDeficitNs = periodicSleep(sleepTime, sleepDeficitNs);
             }
         }
 
@@ -85,6 +98,55 @@ public class ProducerPerformance {
         producer.close();
         stats.printTotal();
     }
+
+    private static long periodicSleep(long sleepTime, long sleepDeficitNs) throws InterruptedException {
+        sleepDeficitNs += sleepTime;
+        if (sleepDeficitNs >= MIN_SLEEP_NS) {
+            long sleepMs = sleepDeficitNs / 1000000;
+            long sleepNs = sleepDeficitNs - sleepMs * 1000000;
+            Thread.sleep(sleepMs, (int) sleepNs);
+            sleepDeficitNs = 0;
+        }
+        return sleepDeficitNs;
+    }
+
+    private static BufferedReader openDataFile (String name) {
+        BufferedReader inputReader = null;
+        try {
+            inputReader = new BufferedReader(new FileReader(name));
+        } catch (FileNotFoundException ex) {
+            LOG.error("Cannot open file: "+name);
+        }
+        return inputReader;
+    }
+
+    private static String convertRawDataToJson(String line) {
+        String[] tokens = new String[3];
+
+        StringTokenizer tokenizer = new StringTokenizer(line, "\t");
+        int ii = 0;
+        while (tokenizer.hasMoreTokens()) {
+            tokens[ii++] = tokenizer.nextToken();
+        }
+
+        DateTime traceTime = DateTime.parse(tokens[0]);
+        Double depthValue = Double.parseDouble(tokens[1]);
+        Double tempValue = Double.parseDouble(tokens[2]);
+
+        JSONStringer stringer = new JSONStringer();
+        try {
+            stringer.object();
+            stringer.key(TRACE_KEY).value(traceTime);
+            stringer.key(DEPTH_KEY).value(depthValue);
+            stringer.key(TEMPERATURE_KEY).value(tempValue);
+            stringer.endObject();
+        } catch (JSONException ex) {
+
+        }
+
+        return stringer.toString();
+    }
+
 
     private static class Stats {
         private long start;
