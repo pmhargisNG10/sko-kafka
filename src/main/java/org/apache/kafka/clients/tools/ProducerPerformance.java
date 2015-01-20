@@ -37,7 +37,8 @@ public class ProducerPerformance {
     private static final long MIN_SLEEP_NS = 2 * NS_PER_MS;
 
     private static final String SKO_KAFKA_CLUSTER_ADDRESS = "scregionsko1502.cloud.hortonworks.com:6667" ;
-    private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/1000traces.tsv" ;
+    //private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/1000traces.tsv" ;
+    private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/dts_data/100000lines.tsv" ;
 
     public static void main(String[] args) throws Exception {
         if (args.length < 3) {
