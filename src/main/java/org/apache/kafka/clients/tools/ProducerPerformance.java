@@ -36,34 +36,34 @@ public class ProducerPerformance {
     private static final long NS_PER_SEC = 1000 * NS_PER_MS;
     private static final long MIN_SLEEP_NS = 2 * NS_PER_MS;
 
-    private static final String SKO_KAFKA_CLUSTER_ADDRESS = "scregionsko1502.cloud.hortonworks.com:6667" ;
-    //private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/1000traces.tsv" ;
-    private static final String SKO_RAW_DTS_DATA_FILE = "/Users/phargis/Downloads/dts_data/100000lines.tsv" ;
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 3) {
+        if (args.length < 5) {
             System.err.println("USAGE: java " + ProducerPerformance.class.getName() +
+                               " kafka_broker_address data_filename " +
                                " topic_name max_records target_records_sec [prop_name=prop_value]*");
             System.exit(1);
         }
 
         /* parse args */
-        String topicName = args[0];
-        long numRecords = Long.parseLong(args[1]);
-        int throughput_target = Integer.parseInt(args[2]);
+        String kakfaBrokerAddress = args[0];
+        String datafile = args[1];
+        String topicName = args[2];
+        long numRecords = Long.parseLong(args[3]);
+        int throughput_target = Integer.parseInt(args[4]);
 
         Properties props = new Properties();
-        for (int i = 3; i < args.length; i++) {
+        for (int i = 5; i < args.length; i++) {
             String[] pieces = args[i].split("=");
             if (pieces.length != 2)
                 throw new IllegalArgumentException("Invalid property: " + args[i]);
             props.put(pieces[0], pieces[1]);
         }
         // Configure Kafka Cluster address
-        props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, SKO_KAFKA_CLUSTER_ADDRESS);
+        props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kakfaBrokerAddress);
         KafkaProducer producer = new KafkaProducer(props);
 
-        BufferedReader br = openDataFile(SKO_RAW_DTS_DATA_FILE);
+        BufferedReader br = openDataFile(datafile);
 
         long sleepTime = NS_PER_SEC / throughput_target;
         long sleepDeficitNs = 0;
